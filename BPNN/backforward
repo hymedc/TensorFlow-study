@@ -1,0 +1,98 @@
+#coding:utf-8
+
+
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+import ClassicNeuroNetwork.dataPreparation as dp
+import ClassicNeuroNetwork.forward as fw
+
+
+
+STEPS=4000
+BATCH_SIZE=30
+LEARNING_RATE_BASE=0.001
+LEARNING_RATE_DECAY=0.999
+REGULARIZER=0.01
+MOVING_AVERAGE_DECAY=0.99
+
+
+def backward():
+    X=tf.placeholder(tf.float32,shape=[None,2])
+    Y_actuality=tf.placeholder(tf.float32,shape=[None,1])
+    
+    
+    
+    Y_predicted=fw.forward(X, regularizer=REGULARIZER)
+    
+    global_step=tf.Variable(0,trainable=False)
+    
+    
+    #实例化滑动平均类，设衰减率为0.99，当前轮数global_step
+    ema = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY,global_step)
+    #ema.apply后面的括号是更新列表，每次运行sess.run(ema_op)时，对更新列表求滑动平均值
+    #在实际应用中会使tf.trainable_variables()自动将所有训练的参数汇总为列表
+    ema_op = ema.apply(tf.trainable_variables())
+    
+    #学习率指数下降
+    learning_rate=tf.train.exponential_decay(
+        learning_rate=LEARNING_RATE_BASE,
+        global_step=global_step,
+        decay_steps=300/BATCH_SIZE,
+        decay_rate=LEARNING_RATE_DECAY,
+        staircase=True)
+    
+    #损失函数：均方误差
+    loss_mse=tf.reduce_mean(tf.square(Y_predicted-Y_actuality))
+    loss_total=loss_mse+tf.add_n(tf.get_collection("losses"))
+    
+#     #损失函数，交叉熵
+#     cross_entropy=tf.nn.softmax_cross_entropy_with_logits_v2(labels=Y_actuality, logits=Y_predicted)
+#     loss_cross_entropy=tf.reduce_sum(cross_entropy)
+#     loss_total=loss_cross_entropy+tf.add_n(tf.get_collection("losses"))
+    
+    optimizer=tf.train.AdamOptimizer(learning_rate).minimize(loss_total)
+    
+    
+    
+
+    #session
+    with tf.Session() as sess:
+        
+        X_trainData,Y_trainData,Y_color=dp.generateDataSets()
+                
+        init_op=tf.global_variables_initializer()
+        sess.run(init_op)
+        sess.run(ema_op)
+    
+
+        for i in range(STEPS):
+            start=(i*BATCH_SIZE)%300
+            end=start+BATCH_SIZE
+        
+            sess.run(optimizer,feed_dict={X:X_trainData[start:end],Y_actuality:Y_trainData[start:end]})
+        
+                        
+            if i%50==0:
+                
+                totle_loss=sess.run(loss_total,feed_dict={X:X_trainData,Y_actuality:Y_trainData})
+                print("i: %d, loss:%g, start:%d, end:%d" %(i,totle_loss,start,end))
+            
+            
+        plot_x, plot_y=np.mgrid[-6:6:0.01,-6:6:0.01]
+        grid=np.c_[plot_x.ravel(),plot_y.ravel()]
+#         print("plot_x:",plot_x)
+#         print("plot_x.ravel():",plot_x.ravel())
+#         print("plot_y:",plot_y)
+#         print("plot_y.ravel():",plot_y.ravel())
+#         print("grid:",grid)
+        probs=sess.run(Y_predicted,feed_dict={X:grid})
+#         print("probs:",probs)
+        probs=probs.reshape(plot_x.shape)
+        print("probs:",probs)
+        
+    plt.scatter(X_trainData[:,0],X_trainData[:,1],c=np.squeeze(Y_color))
+    contour = plt.contour(plot_x,plot_y,probs,levels=[-0.8,0.3,0.5,0.8,1.2])
+    plt.clabel(contour)
+    plt.show()
+
